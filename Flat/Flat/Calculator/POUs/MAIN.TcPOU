@@ -1,0 +1,174 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.6">
+  <POU Name="MAIN" Id="{1f2f84fa-fd26-4131-b40a-895c45c76984}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR CONSTANT
+	Years:							INT := 33;
+END_VAR
+VAR
+	FlatPrice:						REAL := 100000;
+	BrokerageCommissionPercent:		REAL := 2.975;
+	RealEstateTransferTaxPercent:	REAL := 3.5;
+	NotaryFeesPercent:				REAL := 1.5;
+	LandRegisterEntryPercent:		REAL := 0.5;
+	AdditionalCostsPercent:			REAL;
+	
+	BrokerageCommission:			REAL;		//Maklerprovision
+	RealEstateTransferTax:			REAL;		//Grunderwerbssteuer
+	NotaryFees:						REAL;		//Notarkosten
+	LandRegisterEntry:				REAL;		//Grundbucheintrag
+	AdditionalCosts:				REAL;		//Nebenkosten
+	
+	FlatGrossPrice:					REAL;
+	
+	(* Settlement: *)
+	Capital:						REAL := 20000;
+	Salary:							REAL := 2000;
+	CapitalPercent:					REAL;
+	Credit:							REAL;
+	CreditPercent:					REAL;
+	MonthlyInstallment:				REAL := 500;
+	SpecialInstallment:				REAL := 0;
+	InterestRate:					REAL := 1.5;
+	
+	(* Statistics *)
+	InterestAmount:					ARRAY[1..Years*12] OF REAL;
+	PaidInterest:					REAL;
+	PaidInterest10years:			REAL;
+	RestAmount:						ARRAY[1..Years*12] OF REAL;
+	PaymentYears:					INT;
+	PaymentMonths:					INT;
+	MoneyLoss:						REAL;
+	MoneyLossMonthly:				REAL;
+	i:								INT := 1;
+	j:								int;
+	
+	(* VISU *)
+	arVisu:							ARRAY[1..2] OF ARRAY[1..Years*12] OF REAL;
+	arVisu2:						ARRAY[1..3] OF ARRAY[1..Years] OF REAL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Initial Conditions:
+i:=									1;
+MEMSET(ADR(RestAmount), 0, SIZEOF(RestAmount));
+MEMSET(ADR(InterestAmount), 0, SIZEOF(InterestAmount));
+MEMSET(ADR(arVisu), 0, SIZEOF(arVisu));
+MEMSET(ADR(arVisu2), 0, SIZEOF(arVisu2));
+
+// Calculations:
+BrokerageCommission:=				BrokerageCommissionPercent * FlatPrice / 100;
+RealEstateTransferTax:=				RealEstateTransferTaxPercent * FlatPrice / 100;
+NotaryFees:=						NotaryFeesPercent * FlatPrice / 100;
+LandRegisterEntry:=					LandRegisterEntryPercent * FlatPrice / 100;
+AdditionalCostsPercent:=			BrokerageCommissionPercent + RealEstateTransferTaxPercent + NotaryFeesPercent + LandRegisterEntryPercent;
+AdditionalCosts:=					BrokerageCommission + RealEstateTransferTax + NotaryFees + LandRegisterEntry;
+
+FlatGrossPrice:=					AdditionalCosts + FlatPrice;
+CapitalPercent:=					Capital / FlatGrossPrice * 100;
+Credit:=							FlatGrossPrice - Capital;
+IF Credit < 0 THEN
+	Credit :=						0;
+END_IF
+IF Salary > 0 THEN
+	CreditPercent:=					Credit / Salary;
+ELSE
+	CreditPercent:=					0;
+END_IF
+
+InterestAmount[i]:=					Credit * InterestRate / 100 / 12;
+PaidInterest:=						InterestAmount[i];
+PaidInterest10years:=				InterestAmount[i];
+RestAmount[i]:=						Credit + InterestAmount[i] - MonthlyInstallment;
+IF RestAmount[i] < 0 THEN
+	RestAmount[i]:=				0;
+END_IF
+	
+WHILE RestAmount[i] > 0 DO
+	i:=								i + 1;
+	InterestAmount[i]:=				RestAmount[i-1] * InterestRate / 100 / 12;
+	PaidInterest:=					PaidInterest + InterestAmount[i];
+	IF i = 120 THEN
+		PaidInterest10years:=		PaidInterest;
+	END_IF
+	RestAmount[i] :=				RestAmount[i-1] + InterestAmount[i] - MonthlyInstallment;
+	IF (i MOD 12 = 0) THEN
+		RestAmount[i] :=			RestAmount[i] - SpecialInstallment;
+	END_IF
+	IF RestAmount[i] < 0 THEN
+		RestAmount[i]:=				0;
+		IF i < 120 THEN
+			PaidInterest10years:=	PaidInterest;
+		END_IF
+	END_IF
+	IF i = Years*12 THEN
+		EXIT;
+	END_IF
+END_WHILE
+MoneyLoss:=							AdditionalCosts + PaidInterest;
+MoneyLossMonthly:=					MoneyLoss / i;
+PaymentYears:=						i / 12;
+PaymentMonths:=						i MOD 12;
+
+(* VISU *)
+FOR i := 1 TO Years*12 DO
+	arVisu[1][i]:=					DINT_TO_REAL(TRUNC(InterestAmount[i]));
+	arVisu[2][i]:=					DINT_TO_REAL(TRUNC(RestAmount[i]));
+END_FOR
+FOR i := 1 TO PaymentYears + BOOL_TO_INT(PaymentMonths > 0) DO
+	arVisu2[1][i]:=					0;
+	FOR j := 1 TO 12 DO
+		arVisu2[1][i]:=				arVisu2[1][i] + InterestAmount[j+12*(i-1)];
+	END_FOR
+	arVisu2[1][i]:=					DINT_TO_REAL(TRUNC(arVisu2[1][i]));							// Paid interst
+	arVisu2[2][i]:=					DINT_TO_REAL(TRUNC(RestAmount[12*i]));						// Rest credit
+	arVisu2[3][i]:=					((MonthlyInstallment * 12) - arVisu2[1][i]) / Credit * 100;	// Amortization
+END_FOR]]></ST>
+    </Implementation>
+    <LineIds Name="MAIN">
+      <LineId Id="84" Count="2" />
+      <LineId Id="184" Count="0" />
+      <LineId Id="521" Count="1" />
+      <LineId Id="87" Count="11" />
+      <LineId Id="134" Count="2" />
+      <LineId Id="465" Count="1" />
+      <LineId Id="468" Count="1" />
+      <LineId Id="467" Count="0" />
+      <LineId Id="165" Count="0" />
+      <LineId Id="99" Count="0" />
+      <LineId Id="197" Count="0" />
+      <LineId Id="413" Count="0" />
+      <LineId Id="100" Count="0" />
+      <LineId Id="243" Count="1" />
+      <LineId Id="166" Count="0" />
+      <LineId Id="245" Count="0" />
+      <LineId Id="101" Count="0" />
+      <LineId Id="183" Count="0" />
+      <LineId Id="179" Count="0" />
+      <LineId Id="198" Count="0" />
+      <LineId Id="414" Count="2" />
+      <LineId Id="103" Count="0" />
+      <LineId Id="568" Count="2" />
+      <LineId Id="180" Count="1" />
+      <LineId Id="417" Count="2" />
+      <LineId Id="182" Count="0" />
+      <LineId Id="168" Count="2" />
+      <LineId Id="104" Count="0" />
+      <LineId Id="366" Count="0" />
+      <LineId Id="370" Count="0" />
+      <LineId Id="368" Count="0" />
+      <LineId Id="283" Count="0" />
+      <LineId Id="195" Count="0" />
+      <LineId Id="194" Count="0" />
+      <LineId Id="189" Count="0" />
+      <LineId Id="191" Count="0" />
+      <LineId Id="193" Count="0" />
+      <LineId Id="190" Count="0" />
+      <LineId Id="205" Count="0" />
+      <LineId Id="326" Count="0" />
+      <LineId Id="321" Count="3" />
+      <LineId Id="208" Count="0" />
+      <LineId Id="519" Count="0" />
+      <LineId Id="207" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>
